@@ -11,7 +11,7 @@ Example connection URL: `https://your-domain.com/locationHub`
 ## Connection Types
 
 ### 1. Driver Connection
-Drivers connect to share their location in real-time using their **Driver ID (int)**.
+Drivers connect to share their location in real-time.
 
 ### 2. Client Connection (Users/Admin)
 Clients connect to receive real-time location updates from all drivers.
@@ -47,7 +47,7 @@ connection.start()
 
 ```javascript
 function initializeDriverConnection() {
-    const driverId = 123; // Driver ID as integer (not string)
+    const driverId = "your-driver-user-id";
     
     // Connect as driver
     connection.invoke("ConnectDriver", driverId)
@@ -66,9 +66,12 @@ function startLocationTracking() {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
                     const locationUpdate = {
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude,
-                        timestamp: new Date().toISOString()
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        timestamp: new Date().toISOString(),
+                        speed: position.coords.speed,
+                        heading: position.coords.heading,
+                        accuracy: position.coords.accuracy
                     };
                     
                     // Send location via SignalR
@@ -139,10 +142,13 @@ POST /api/location/update
 Content-Type: application/json
 
 {
-    "driverId": 123,
-    "lat": 40.7128,
-    "lng": -74.0060,
-    "timestamp": "2024-01-01T12:00:00Z"
+    "driverId": "string",
+    "latitude": 40.7128,
+    "longitude": -74.0060,
+    "timestamp": "2024-01-01T12:00:00Z",
+    "speed": 50.5,
+    "heading": 180.0,
+    "accuracy": 10.0
 }
 ```
 
@@ -153,71 +159,10 @@ GET /api/location/drivers
 
 ### 3. Get Specific Driver Location (GET)
 ```
-GET /api/location/driver/123
+GET /api/location/driver/{driverId}
 ```
 
 ### 4. Get Nearby Drivers (GET)
 ```
-GET /api/location/nearby?lat=40.7128&lng=-74.0060&radiusKm=10
+GET /api/location/nearby?latitude=40.7128&longitude=-74.0060&radiusKm=10
 ```
-
-### 5. Remove Driver Location (DELETE)
-```
-DELETE /api/location/driver/123
-```
-
-## Data Models
-
-### DriverLocationDto (Request)
-```json
-{
-    "driverId": 123,
-    "lat": 40.7128,
-    "lng": -74.0060,
-    "timestamp": "2024-01-01T12:00:00Z"
-}
-```
-
-### DriverLocationResponseDto (Response)
-```json
-{
-    "driverId": 123,
-    "driverName": "John Doe",
-    "lat": 40.7128,
-    "lng": -74.0060,
-    "lastUpdate": "2024-01-01T12:00:00Z",
-    "isOnline": true
-}
-```
-
-## SignalR Events
-
-### Client-to-Server Events
-- `ConnectDriver(driverId: int)` - Driver connects and starts sharing location
-- `ConnectClient()` - Client connects to receive location updates
-- `UpdateLocation(locationUpdate)` - Driver sends location update
-- `UpdateLocationWithDriverId(driverId: int, locationUpdate)` - Alternative method with explicit driver ID
-- `GetOnlineDrivers()` - Request list of online drivers
-- `GetDriverLocation(driverId: int)` - Request specific driver location
-- `Ping()` - Keep connection alive
-
-### Server-to-Client Events
-- `OnlineDrivers(drivers[])` - List of currently online drivers
-- `LocationUpdate(driverLocation)` - Real-time location update
-- `DriverConnected(driver)` - New driver came online
-- `DriverDisconnected(driver)` - Driver went offline
-- `DriverLocationUpdate(driverLocation)` - Location update for other drivers
-- `DriverLocation(driverLocation)` - Response to GetDriverLocation
-- `DriverNotFound(driverId: int)` - Driver not found response
-- `DriverRemoved(driverId: int)` - Driver removed from tracking
-- `Pong(timestamp)` - Response to ping
-
-## Important Notes
-
-- **Driver ID**: Uses the real driver ID (integer) from the Driver entity, not the user ID (string)
-- **Database Lookup**: The system looks up driver information using `d.Id == driverId` where driverId is an integer
-- **Connection Mapping**: The hub maintains a mapping between SignalR connection IDs and driver IDs for proper tracking
-- **Offline Detection**: Drivers are considered offline if no location update is received for 5 minutes
-- **Memory Storage**: Driver locations are kept in memory and will be lost on server restart
-- **Simplified Location Data**: Only lat, lng, and timestamp are tracked
-- **Consistent Naming**: Uses `lat` and `lg

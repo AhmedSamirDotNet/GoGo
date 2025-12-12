@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Location Tracking - Test Page</title>
+    <script src="https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
+        .log { background-color: #f5f5f5; padding: 10px; height: 200px; overflow-y: scroll; margin: 10px 0; }
+        button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        input { padding: 8px; margin: 5px; }
+        .online { color: green; }
+        .offline { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Driver Location Tracking - Test Page</h1>
+    
+    <div class="section">
+        <h3>Connection</h3>
+        <input type="text" id="hubUrl" placeholder="Hub URL" value="https://localhost:7071/locationHub">
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+        <span id="connectionStatus" class="offline">Disconnected</span>
+    </div>
+
+    <div class="section">
+        <h3>Driver Mode</h3>
+        <input type="number" id="driverId" placeholder="Driver ID" value="123">
+        <button onclick="connectAsDriver()">Connect as Driver</button>
+        <button onclick="startLocationTracking()">Start Location Tracking</button>
+        <button onclick="stopLocationTracking()">Stop Location Tracking</button>
+        <div>
+            Lat: <input type="number" id="driverLat" placeholder="Latitude" value="40.7128" step="0.0001">
+            Lng: <input type="number" id="driverLng" placeholder="Longitude" value="-74.0060" step="0.0001">
+            <button onclick="sendManualLocation()">Send Manual Location</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Client Mode</h3>
+        <button onclick="connectAsClient()">Connect as Client</button>
+        <button onclick="getOnlineDrivers()">Get Online Drivers</button>
+        <button onclick="getDriverLocation()">Get Specific Driver Location</button>
+    </div>
+
+    <div class="section">
+        <h3>Online Drivers</h3>
+        <div id="driversContainer"></div>
+    </div>
+
+    <div class="section">
+        <h3>Log</h3>
+        <div id="log" class="log"></div>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <script>
+        let connection = null;
+        let isConnected = false;
+        let locationInterval = null;
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('connectionStatus');
+            statusElement.textContent = status;
+            statusElement.className = status === 'Connected' ? 'online' : 'offline';
+        }
+
+        async function connect() {
+            const hubUrl = document.getElementById('hubUrl').value;
+            
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl(hubUrl)
+                .withAutomaticReconnect()
+                .build();
+
+            // Set up event handlers
+            connection.on("OnlineDrivers", (drivers) => {
+                log(`Received online drivers: ${JSON.stringify(drivers)}`);
+                updateDriversDisplay(drivers);
+            });
+
+            connection.on("LocationUpdate", (driverLocation) => {
+                log(`Location update: ${JSON.stringify(driverLocation)}`);
+                updateDriverLocation(driverLocation);
+            });
+
+            connection.on("DriverConnected", (driver) => {
+                log(`Driver connected: ${JSON.stringify(driver)}`);
+            });
+
+            connection.on("DriverDisconnected", (driver) => {
+                log(`Driver disconnected: ${JSON.stringify(driver)}`);
+            });
+
+            connection.on("DriverLocation", (driverLocation) => {
+                log(`Driver location: ${JSON.stringify(driverLocation)}`);
+            });
+
+            connection.on("DriverNotFound", (driverId) => {
+                log(`Driver not found: ${driverId}`);
+            });
+
+            connection.on("Pong", (timestamp) => {
+                log(`Pong received: ${timestamp}`);
+            });
+
+            connection.onclose((error) => {
+                log("Connection closed: " + (error || ""));
+                updateConnectionStatus('Disconnected');
+                isConnected = false;
+            });
+
+            connection.onreconnecting((error) => {
+                log("Reconnecting: " + (error || ""));
+                updateConnectionStatus('Reconnecting...');
+            });
+
+            connection.onreconnected((connectionId) => {
+                log("Reconnected: " + (connectionId || ""));
+                updateConnectionStatus('Connected');
+                isConnected = true;
+            });
+
+            try {
+                await connection.start();
+                log("Connected to SignalR hub");
+                updateConnectionStatus('Connected');
+                isConnected = true;
+            } catch (err) {
+                log("Connection failed: " + err);
+                updateConnectionStatus('Failed');
+            }
+        }
+
+        async function disconnect() {
+            if (connection) {
+                await connection.stop();
+                log("Disconnected from SignalR hub");
+                updateConnectionStatus('Disconnected');
+                isConnected = false;
+            }
+        }
+
+        async function connectAsDriver() {
+            if (!isConnected) {
+                log("Please connect first");
+                return;
+            }
+
+            const driverId = parseInt(document.getElementById('driverId').value);
+            try {
+                await connection.invoke("ConnectDriver", driverId);
+                log(`Connected as driver: ${driverId}`);
+            } catch (err) {
+                log("Failed to connect as driver: " + err);
+            }
+        }
+
+        async function connectAsClient() {
+            if (!isConnected) {
+                log("Please connect first");
+                return;
+            }
+
+            try {
+                await connection.invoke("ConnectClient");
+                log("Connected as client");
+            } catch (err) {
+                log("Failed to connect as client: " + err);
+            }
+        }
+
+        function startLocationTracking() {
+            if (!isConnected) {
+                log("Please connect first");
+                return;
+            }
+
+            if (navigator.geolocation) {
+                locationInterval = setInterval(() => {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const locationUpdate = {
+                                lat: position.coords.latitude,
+                                lng: position.coords.longitude,
+                                timestamp: new Date().toISOString()
+                            };
+                            
+                            sendLocationUpdate(locationUpdate);
+                        },
+                        (error) => {
+                            log("Location error: " + error.message);
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 5000
+                        }
+                    );
+                }, 10000);
+                
+                log("Started location tracking");
+            } else {
+                log("Geolocation is not supported by this browser");
+            }
+        }
+
+        function stopLocationTracking() {
+            if (locationInterval) {
+                clearInterval(locationInterval);
+                locationInterval = null;
+                log("Stopped location tracking");
+            }
+        }
+
+        async function sendManualLocation() {
+            const lat = parseFloat(document.getElementById('driverLat').value);
+            const lng = parseFloat(document.getElementById('driverLng').value);
+            
+            const locationUpdate = {
+                lat: lat,
+                lng: lng,
+                timestamp: new Date().toISOString()
+            };
+            
+            await sendLocationUpdate(locationUpdate);
+        }
+
+        async function sendLocationUpdate(locationUpdate) {
+            if (!isConnected) {
+                log("Please connect first");
+                return;
+            }
+
+            try {
+                await connection.invoke("UpdateLocation", locationUpdate);
+                log(`Location sent: ${locationUpdate.lat}, ${locationUpdate.lng}`);
+            } catch (err) {
+                log("Failed to send location: " + err);
+            }
+        }
+
+        async function getOnlineDrivers() {
+            if (!isConnected) {
+                log("Please connect first");
+                return;
+            }
+
+            try {
+                await connection.invoke("GetOnlineDrivers");
+                log("Requested online drivers");
+            } catch (err) {
+                log("Failed to get online drivers: " + err);
+            }
+        }
+
+        async function getDriverLocation() {
+            if (!isConnected) {
+                log("Please connect first");
+                return;
+            }
+
+            const driverId = parseInt(document.getElementById('driverId').value);
+            try {
+                await connection.invoke("GetDriverLocation", driverId);
+                log(`Requested location for driver: ${driverId}`);
+            } catch (err) {
+                log("Failed to get driver location: " + err);
+            }
+        }
+
+        function updateDriversDisplay(drivers) {
+            const container = document.getElementById('driversContainer');
+            container.innerHTML = '';
+            
+            drivers.forEach(driver => {
+                const driverDiv = document.createElement('div');
+                driverDiv.innerHTML = `
+                    <strong>${driver.driverName}</strong> (${driver.driverId})
+                    <br>Location: ${driver.lat.toFixed(6)}, ${driver.lng.toFixed(6)}
+                    <br>Status: <span class="${driver.isOnline ? 'online' : 'offline'}">${driver.isOnline ? 'Online' : 'Offline'}</span>
+                    <br>Last Update: ${new Date(driver.lastUpdate).toLocaleString()}
+                    <hr>
+                `;
+                container.appendChild(driverDiv);
+            });
+        }
+
+        function updateDriverLocation(driverLocation) {
+            // This function would update individual driver markers on a map
+            // For now, we'll just refresh the entire display
+            getOnlineDrivers();
+        }
+    </script>
+</body>
+</html>
